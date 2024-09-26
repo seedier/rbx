@@ -24,7 +24,7 @@
   
   const div = document.createElement('div');
   div.id = 'rorsl-panel';
-  div.innerHTML = await fetch(chrome.runtime.getURL('html/main.html')).then(res => res.text())
+  div.innerHTML = await fetch(chrome.runtime.getURL('html/main.html')).then(res => res.text());
   if (document.body.classList.contains('dark-theme')) div.classList.add('dark');
   div.style.display = 'none';
   const mainContainer = await waitForElm('#container-main');
@@ -44,9 +44,8 @@
 
   const get = async (url, includeCreds = false) => {
     try {
-      creds = 'omit';
-      if (includeCreds) creds = 'include';
-      const request = await fetch(`https://${url}`, {credentials: creds});
+      creds = includeCreds ? 'include' : 'omit';
+      const request = await fetch(`https://${url}`, { credentials: creds });
       if (!request.ok) throw new Error('Request failed');
 
       return await request.json();
@@ -77,9 +76,9 @@
   
   const settingsButton = document.getElementById('rorsl-settings-button');
   settingsButton.src = getURL('images/settings_icon.svg');
-  const settingsWindow = document.getElementById('rorsl-settings')
+  const settingsWindow = document.getElementById('rorsl-settings');
   const infoIcons = document.getElementsByClassName("rorsl-info-button");
-  for (icon of infoIcons)
+  for (const icon of infoIcons)
     icon.src = getURL('images/info_icon.png');
   const reloadButtonContainer = document.getElementById('rorsl-reload-container');
   const reloadButton = document.getElementById('rorsl-reload');
@@ -108,7 +107,7 @@
   let maxPages = 1;
   let page = 1;
 
-  let playerImageUrl;
+  let playerImageUrl = null; // Ensure it's initially null
   let playerUrlReady = false;
 
   let targetServerIds = {
@@ -126,20 +125,17 @@
 
   async function fetchServers(pass = 1, cursor = '', attempts = 0) {
     const { nextPageCursor, data } = await get(`games.roblox.com/v1/games/${place}/servers/Public?limit=100&cursor=${cursor}`);
-    if (pass == 1 && cursor == '') {
+    if (pass === 1 && cursor === '') {
       const { id } = await get(`users.roblox.com/v1/users/authenticated`, true);
       const { data } = await get(`friends.roblox.com/v1/users/${id}/friends`);
-      const friendIds = [];
-      data.forEach((friend) => {
-        friendIds.push(friend.id);
-      });
+      const friendIds = data.map(friend => friend.id);
       if (friendIds.length > 0) {
-        const { data } = await get(`games.roblox.com/v1/games/${place}/servers/Friend?limit=100`,true);
+        const { data } = await get(`games.roblox.com/v1/games/${place}/servers/Friend?limit=100`, true);
         data.forEach((server) => {
           server.players.forEach((player) => {
             if (friendIds.includes(player.id)) {
               const friends = friendServers.get(server.id) || [];
-              if (friends.length == 0) friendServers.set(server.id, friends);
+              if (friends.length === 0) friendServers.set(server.id, friends);
               friends.push(player);
             }
           });
@@ -156,7 +152,7 @@
     }
 
     data.forEach((server) => {
-      if (!serverIds.has(server.id))
+      if (!serverIds.has(server.id)) {
         server.playerTokens.forEach((playerToken) => {
           serverIds.add(server.id);
           playersCount += 1;
@@ -167,6 +163,7 @@
             requestId: server.id,
           });
         });
+      }
       maxPlayers = server.maxPlayers;
     });
     
@@ -174,83 +171,95 @@
     return fetchServers(pass, nextPageCursor);
   }
 
-  async function findTarget() {
-    while (true) {
-      const chosenPlayers = [];
+ async function findTarget() {
+  let targetFound = false;
 
-      for (let i = 0; i < 100; i++) {
-        const playerToken = allPlayers.shift();
-        if (!playerToken) break;
-        chosenPlayers.push(playerToken);
+  while (!targetFound) {
+    const chosenPlayers = [];
+
+    for (let i = 0; i < 100; i++) {
+      const playerToken = allPlayers.shift();
+      if (!playerToken) break;
+      chosenPlayers.push(playerToken);
+    }
+
+    if (!chosenPlayers.length) {
+      await sleep(0.1);
+      if (playersChecked === playersCount && foundAllServers) {
+        break;
       }
+      continue;
+    }
 
-      if (!chosenPlayers.length) {
-        await sleep(0.1);
-        if (playersChecked === playersCount && foundAllServers) {
-          break;
+    await post('thumbnails.roblox.com/v1/batch', JSON.stringify(chosenPlayers)).then(({ data: thumbnailsData }) => {
+      thumbnailsData.forEach((thumbnailData) => {
+        const thumbnails = allThumbnails.get(thumbnailData.requestId) || [];
+        if (thumbnails.length === 0) {
+          allThumbnails.set(thumbnailData.requestId, thumbnails);
         }
-        continue;
-      }
 
-      post('thumbnails.roblox.com/v1/batch', JSON.stringify(chosenPlayers)).then(({ data: thumbnailsData }) => {
+        playersChecked += 1;
+        thumbnails.push(thumbnailData.imageUrl);
 
-        thumbnailsData.forEach((thumbnailData) => {
-          const thumbnails = allThumbnails.get(thumbnailData.requestId) || [];
+        // Ensure playerImageUrl is set correctly
+        if (!playerImageUrl && thumbnailData.imageUrl.includes('https://tr.rbxcdn.com')) {
+          playerImageUrl = thumbnailData.imageUrl; // Set playerImageUrl only if it's valid
+        }
 
-          if (thumbnails.length == 0) {
-            allThumbnails.set(thumbnailData.requestId, thumbnails);
-          }
-
-          playersChecked += 1;
-
-          thumbnails.push(thumbnailData.imageUrl);
-
-          //const foundTarget = thumbnailData.imageUrl === imageUrl ? thumbnailData.requestId : null;
-
-          let containsId = false;
-          targetServerIds.forEach((targetServerId) => {
-            if (targetServerId.serverId == thumbnailData.requestId) containsId = true;
-          });
-          if (!containsId) targetServerIds.push({serverId: thumbnailData.requestId});
+        let containsId = false;
+        targetServerIds.forEach((targetServerId) => {
+          if (targetServerId.serverId === thumbnailData.requestId) containsId = true;
         });
+        if (!containsId) targetServerIds.push({ serverId: thumbnailData.requestId });
       });
-    }
-    targetServerIds.forEach((targetServerId) => {
-      targetServerId.serverSize = allThumbnails.get(targetServerId.serverId).length;
     });
-    if (targetServerIds.length) {
-      targetServerIds.forEach(targetServerId => {
-        const thumbnails = allThumbnails.get(targetServerId.serverId);
-        thumbnails.reverse();
-      })
-      preLoadServers();
-    } else {
-      color(COLORS.RED);
-      status.innerText = 'No servers found.';
-      searchButton.disabled = false;
-      searchButtonContainer.style.opacity = '100%';
-    }
   }
 
+  targetServerIds.forEach((targetServerId) => {
+    targetServerId.serverSize = allThumbnails.get(targetServerId.serverId).length;
+  });
+
+  if (targetServerIds.length) {
+    targetServerIds.forEach(targetServerId => {
+      const thumbnails = allThumbnails.get(targetServerId.serverId);
+      thumbnails.reverse();
+    });
+    preLoadServers();
+  } else {
+    color(COLORS.RED);
+    status.innerText = 'No servers found.';
+    searchButton.disabled = false;
+    searchButtonContainer.style.opacity = '100%';
+  }
+}
+
   async function updateUser() {
-    try {
-      let userName = "Roblox";
-      await chrome.storage.local.get('username').then(value => {
-        if (userName != undefined) userName = value.username;
-      });
-      const { data: [{ id }] } = await post('users.roblox.com/v1/usernames/users', `{"usernames": ["${userName}"],"excludeBannedUsers": false}`)
-      const { data: [{ imageUrl }] } = await get(`thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=150x150&format=Png&isCircular=false`);
-      userStatus.innerText = '';
-      userImage.src = imageUrl;
-      if (imageUrl.includes('https://tr.rbxcdn.com')) playerImageUrl = imageUrl;
-      else userStatus.innerText = 'User thumbnail is a common error thumbnail, unable to find user';
-      playerUrlReady = true;
-    } catch (error) {
-      userStatus.innerText = 'Username is Invalid for thumbnail, unable to find user';
-      userImage.src = 'https://t6.rbxcdn.com/b48637b2a6266bd379a09afb5a8d5131';
+  try {
+    let userName = "Roblox"; // Default username
+    await chrome.storage.local.get('username').then(value => {
+      if (value.username != undefined) userName = value.username;
+    });
+
+    const { data: [{ id }] } = await post('users.roblox.com/v1/usernames/users', `{"usernames": ["${userName}"],"excludeBannedUsers": false}`);
+    const { data: [{ imageUrl }] } = await get(`thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=150x150&format=Png&isCircular=false`);
+    
+    userStatus.innerText = '';
+    userImage.src = imageUrl;
+
+    // Set playerImageUrl correctly
+    if (imageUrl.includes('https://tr.rbxcdn.com')) {
+      playerImageUrl = imageUrl; // Set the playerImageUrl
+    } else {
+      userStatus.innerText = 'User thumbnail is a common error thumbnail, unable to find user';
       playerUrlReady = true;
     }
-  };
+  } catch (error) {
+    userStatus.innerText = 'Username is Invalid for thumbnail, unable to find user';
+    userImage.src = 'https://t6.rbxcdn.com/b48637b2a6266bd379a09afb5a8d5131';
+    playerUrlReady = true;
+  }
+}
+
 
   async function searchServers() {
     searchButton.disabled = true;
@@ -275,18 +284,33 @@
     removeExtraInfo();
     deleteRorslServers();
     playerUrlReady = false;
-    updateUser();
+
+    await updateUser(); // Ensure the user image is updated
+
+    // Wait until playerUrlReady is true and playerImageUrl is valid
+    while (!playerUrlReady) {
+        await sleep(0.1);
+    }
+
+    // Check if playerImageUrl was set correctly
+    if (!playerImageUrl || !playerImageUrl.includes('https://tr.rbxcdn.com')) {
+        userStatus.innerText = 'Unable to find valid user thumbnail';
+        return; // Exit if playerImageUrl is invalid
+    }
+
     var passes = 1;
     chrome.storage.local.get('searchPasses').then(value => {
-      if (!isNaN(value.searchPasses)) passes = value.searchPasses;
-      if (passes < 1) passes = 1;
-      if (passes > 10) passes = 10;
+        if (!isNaN(value.searchPasses)) passes = value.searchPasses;
+        if (passes < 1) passes = 1;
+        if (passes > 10) passes = 10;
     });
+
     findTarget();
     for (var pass = 0; pass < passes; pass++)
-      if (!foundAllServers) await fetchServers(pass+1);
+        if (!foundAllServers) await fetchServers(pass + 1);
     foundAllServers = true;
-  }
+}
+
 
   async function removeExtraInfo() {
     var noServers = document.getElementsByClassName("no-servers-message");

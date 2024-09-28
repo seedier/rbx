@@ -171,7 +171,7 @@
     return fetchServers(pass, nextPageCursor);
   }
 
- async function findTarget() {
+async function findTarget() {
   let targetFound = false;
 
   while (!targetFound) {
@@ -206,13 +206,24 @@
           playerImageUrl = thumbnailData.imageUrl; // Set playerImageUrl only if it's valid
         }
 
-        let containsId = false;
-        targetServerIds.forEach((targetServerId) => {
-          if (targetServerId.serverId === thumbnailData.requestId) containsId = true;
-        });
-        if (!containsId) targetServerIds.push({ serverId: thumbnailData.requestId });
+        // Check if this thumbnail matches the target condition
+        if (thumbnailData.imageUrl === playerImageUrl) {
+          targetServerIds.push({ serverId: thumbnailData.requestId });
+          targetFound = true; // Set the flag to true
+        }
+
+        // Avoid adding duplicates to targetServerIds
+        let containsId = targetServerIds.some(targetServerId => targetServerId.serverId === thumbnailData.requestId);
+        if (!containsId) {
+          targetServerIds.push({ serverId: thumbnailData.requestId });
+        }
       });
     });
+
+    // Break the loop if the target is found
+    if (targetFound) {
+      break;
+    }
   }
 
   targetServerIds.forEach((targetServerId) => {
@@ -232,6 +243,7 @@
     searchButtonContainer.style.opacity = '100%';
   }
 }
+
 
   async function updateUser() {
   try {

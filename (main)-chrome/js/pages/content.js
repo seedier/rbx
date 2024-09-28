@@ -622,6 +622,14 @@ async function findTarget() {
   chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request == "rorsl refresh settings") loadSettings();
   });
+  // In content.js
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'refreshSettings') {
+        // Handle the refresh settings logic here
+        console.log('Refresh settings message received');
+    }
+});
+
 
   const runningGames = await waitForElm('#rbx-running-games');
   runningGames.parentNode.insertBefore(div, runningGames);
